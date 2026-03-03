@@ -52,6 +52,7 @@ We aren't selling snake oil.
 If you're tired of being your laptop's unpaid intern, start here:
 
 *   **[Getting Started](./docs/getting-started.md)**: How to let the wolf into the house.
+*   **[Configuration](./docs/config.md)**: Options for the daemon and API.
 *   **[Architecture](./docs/architecture.md)**: How we keep the LLM from burning everything down.
 *   **[Nix Strategy](./docs/nix-strategy.md)**: Why declarative config is the only way to live.
 *   **[Security](./docs/security.md)**: Trust tiers, privilege escalation, and how we stay safe.

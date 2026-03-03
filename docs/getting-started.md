@@ -39,7 +39,7 @@ This detects your platform and creates:
 **NixOS / Linux** at `/etc/lares/`:
 ```
 /etc/lares/
-  lares.toml                     # Daemon config (API key, model, etc)
+  lares.toml                     # Daemon config (see config.md)
   flake.nix                      # Tier-appropriate inputs + outputs
   system/default.nix             # System config (NixOS only, not Linux HM)
   users/<you>/default.nix        # Your Home Manager config
@@ -54,7 +54,7 @@ This detects your platform and creates:
 **macOS** at `/Library/Lares/`:
 ```
 /Library/Lares/
-  lares.toml                     # Daemon config
+  lares.toml                     # Daemon config (see config.md)
   flake.nix                      # nix-darwin + Home Manager
   system/default.nix             # nix-darwin system config
   users/<you>/default.nix        # Your Home Manager config
@@ -199,7 +199,7 @@ Init options:
 The daemon isn't running. Start it with `sudo laresd`.
 
 **"API key not set"**
-Run `sudo lares init` to set up the daemon config with your API key, or edit `lares.toml` in the config repo directly (`/etc/lares/lares.toml` on Linux, `/Library/Lares/lares.toml` on macOS).
+Run `sudo lares init` to set up the daemon config with your API key, or edit `lares.toml` in the config repo directly. See the [Configuration Guide](./config.md) for details.
 
 **Agent does nothing / empty responses**
 Check `RUST_LOG=debug sudo laresd` output for the full request/response cycle. Verify your OpenRouter API key has credits and the model you've configured is available.

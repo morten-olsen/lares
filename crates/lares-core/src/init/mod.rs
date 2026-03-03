@@ -89,7 +89,7 @@ pub async fn scaffold(config_repo: &Path, api_key: &str) -> Result<InitResult> {
     executor::run_command("git add -A", Some(&repo)).await
         .context("git add")?;
     executor::run_command(
-        "git commit -m 'Initial configuration (scaffolded by lares)'",
+        "git -c user.name=lares -c user.email=lares@localhost -c commit.gpgsign=false commit -m 'Initial configuration (scaffolded by lares)'",
         Some(&repo),
     ).await.context("git commit")?;
 
@@ -200,7 +200,7 @@ pub async fn adopt(repo_path: &Path, branch: Option<&str>, profile: Option<&str>
         executor::run_command("git add lares/", Some(&repo)).await
             .context("git add lares/")?;
         executor::run_command(
-            "git commit -m 'lares: add task and automation directories'",
+            "git -c user.name=lares -c user.email=lares@localhost -c commit.gpgsign=false commit -m 'lares: add task and automation directories'",
             Some(&repo),
         ).await.context("git commit")?;
     }

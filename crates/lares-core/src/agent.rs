@@ -32,6 +32,8 @@ pub struct AgentLoop {
     client: LlmClient,
     config: Config,
     username: String,
+    uid: u32,
+    gid: u32,
     task_store: TaskStore,
     approval_gate: Arc<dyn ApprovalGate>,
     question_gate: Arc<dyn QuestionGate>,
@@ -43,6 +45,8 @@ impl AgentLoop {
     pub fn new(
         config: Config,
         username: String,
+        uid: u32,
+        gid: u32,
         task_store: TaskStore,
         approval_gate: Arc<dyn ApprovalGate>,
         question_gate: Arc<dyn QuestionGate>,
@@ -53,6 +57,8 @@ impl AgentLoop {
             client,
             config,
             username,
+            uid,
+            gid,
             task_store,
             approval_gate,
             question_gate,
@@ -184,7 +190,7 @@ impl AgentLoop {
                 });
 
                 task.add_journal("action", &format!("run_command: {command}"));
-                let output = executor::run_command(command, working_dir).await?;
+                let output = executor::run_command_as(command, working_dir, Some(self.uid), Some(self.gid)).await?;
                 let result = output.to_string();
                 task.add_journal("result", &truncate(&result, 500));
                 Ok(result)
@@ -281,10 +287,17 @@ impl AgentLoop {
 
         // 5. Re-stage (dry-run may have changed lockfiles etc) and commit
         executor::run_command("git add -A", Some(&repo)).await?;
-        let commit = executor::run_command(
-            &format!("git commit -m {}", shell_escape(message)),
-            Some(&repo),
-        ).await?;
+        
+        // Build git commit with explicit identity and no GPG signing
+        let git_name = &self.config.build.git_author_name;
+        let git_email = &self.config.build.git_author_email;
+        let commit_cmd = format!(
+            "git -c user.name={} -c user.email={} -c commit.gpgsign=false commit -m {}",
+            shell_escape(git_name),
+            shell_escape(git_email),
+            shell_escape(message)
+        );
+        let commit = executor::run_command(&commit_cmd, Some(&repo)).await?;
 
         if !commit.success {
             let _ = executor::run_command("git reset", Some(&repo)).await;

@@ -18,10 +18,32 @@ pub async fn write_file(path: &str, content: &str) -> Result<()> {
 }
 
 pub async fn run_command(command: &str, working_dir: Option<&str>) -> Result<CommandOutput> {
+    run_command_as(command, working_dir, None, None).await
+}
+
+pub async fn run_command_as(
+    command: &str,
+    working_dir: Option<&str>,
+    uid: Option<u32>,
+    gid: Option<u32>,
+) -> Result<CommandOutput> {
     let mut cmd = Command::new("sh");
     cmd.arg("-c").arg(command);
     if let Some(dir) = working_dir {
         cmd.current_dir(dir);
+    }
+
+    // Drop privileges to run as the specified user
+    #[cfg(unix)]
+    if uid.is_some() || gid.is_some() {
+        #[allow(unused_imports)]
+        use std::os::unix::process::CommandExt;
+        if let Some(uid) = uid {
+            cmd.uid(uid);
+        }
+        if let Some(gid) = gid {
+            cmd.gid(gid);
+        }
     }
 
     let output = cmd

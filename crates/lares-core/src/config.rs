@@ -39,12 +39,37 @@ pub struct ProfileConfig {
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct BuildConfig {
     /// Custom dry-run/test command (e.g. "make check")
     pub test_command: Option<String>,
     /// Custom rebuild/apply command (e.g. "make switch")
     pub apply_command: Option<String>,
+    /// Git commit author name (defaults to "lares")
+    #[serde(default = "default_git_author_name")]
+    pub git_author_name: String,
+    /// Git commit author email (defaults to "lares@localhost")
+    #[serde(default = "default_git_author_email")]
+    pub git_author_email: String,
+}
+
+impl Default for BuildConfig {
+    fn default() -> Self {
+        Self {
+            test_command: None,
+            apply_command: None,
+            git_author_name: default_git_author_name(),
+            git_author_email: default_git_author_email(),
+        }
+    }
+}
+
+fn default_git_author_name() -> String {
+    "lares".into()
+}
+
+fn default_git_author_email() -> String {
+    "lares@localhost".into()
 }
 
 fn default_model() -> String {
@@ -89,8 +114,7 @@ impl Config {
         if path.exists() {
             let text = std::fs::read_to_string(&path)
                 .with_context(|| format!("reading config from {}", path.display()))?;
-            let mut cfg: Config =
-                toml::from_str(&text).with_context(|| "parsing lares.toml")?;
+            let mut cfg: Config = toml::from_str(&text).with_context(|| "parsing lares.toml")?;
             // env var overrides file key
             if let Ok(env_key) = std::env::var("OPENROUTER_API_KEY") {
                 cfg.api.key = Some(env_key);
@@ -162,8 +186,15 @@ fn config_path() -> PathBuf {
 }
 
 pub fn default_socket_path() -> PathBuf {
-    let uid = unsafe { libc::getuid() };
-    PathBuf::from(format!("/tmp/lares-{uid}/lares.sock"))
+    // System-wide socket path - all users connect to the same daemon
+    #[cfg(target_os = "macos")]
+    {
+        PathBuf::from("/var/run/lares/lares.sock")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        PathBuf::from("/run/lares/lares.sock")
+    }
 }
 
 fn expand_tilde(p: &str) -> PathBuf {

@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -34,6 +36,16 @@ async fn main() -> Result<()> {
 
     let listener = UnixListener::bind(&socket_path)
         .with_context(|| format!("binding to {}", socket_path.display()))?;
+    
+    // Set socket permissions to allow all users to connect (0666)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&socket_path)?.permissions();
+        perms.set_mode(0o666);
+        std::fs::set_permissions(&socket_path, perms)?;
+    }
+    
     info!("laresd listening on {}", socket_path.display());
 
     loop {
@@ -55,13 +67,13 @@ type PendingApprovals = Arc<Mutex<HashMap<Uuid, oneshot::Sender<bool>>>>;
 type PendingReplies = Arc<Mutex<HashMap<Uuid, oneshot::Sender<String>>>>;
 
 async fn handle_session(stream: UnixStream, config: Config) -> Result<()> {
-    // Identify the connecting user. In production, this would use SO_PEERCRED
-    // for kernel-verified identity. For now, use $USER.
-    let username = std::env::var("USER").unwrap_or_else(|_| "unknown".into());
+    // Identify the connecting user via SO_PEERCRED (UID from socket)
+    let (username, uid, gid) = get_peer_credentials(&stream)?;
 
     let framed = Framed::new(stream, LengthDelimitedCodec::new());
     let (sink, mut source) = framed.split();
     let sink = Arc::new(Mutex::new(sink));
+    let config = Arc::new(config);
 
     let pending: PendingApprovals = Arc::new(Mutex::new(HashMap::new()));
     let pending_replies: PendingReplies = Arc::new(Mutex::new(HashMap::new()));
@@ -73,14 +85,16 @@ async fn handle_session(stream: UnixStream, config: Config) -> Result<()> {
 
         match msg {
             ClientMessage::Prompt { text, task_id } => {
-                let config = config.clone();
                 let sink = Arc::clone(&sink);
+                let config = Arc::clone(&config);
                 let pending = Arc::clone(&pending);
                 let pending_replies = Arc::clone(&pending_replies);
                 let username = username.clone();
-
+                let user_uid = uid;
+                let user_gid = gid;
+                
                 tokio::spawn(async move {
-                    if let Err(e) = run_agent_task(&config, &username, &text, task_id, sink, pending, pending_replies).await {
+                    if let Err(e) = run_agent_task(&config, &username, user_uid, user_gid, &text, task_id, sink, pending, pending_replies).await {
                         error!("agent task failed: {e:#}");
                     }
                 });
@@ -127,19 +141,21 @@ async fn send_event(sink: &Arc<Mutex<FramedSink>>, event: DaemonEvent) -> Result
 async fn run_agent_task(
     config: &Config,
     username: &str,
-    prompt: &str,
+    uid: u32,
+    gid: u32,
+    text: &str,
     task_id: Option<String>,
     sink: Arc<Mutex<FramedSink>>,
     pending: PendingApprovals,
     pending_replies: PendingReplies,
 ) -> Result<()> {
-    let task_store = TaskStore::new(&config.config_repo(), username);
+    let task_store = TaskStore::with_ownership(&config.config_repo(), username, uid, gid);
 
     // Create or resume task
     let mut task = if let Some(ref id) = task_id {
         task_store.load(id)?
     } else {
-        task_store.create(prompt, prompt)?
+        task_store.create(text, text)?
     };
 
     let tid = task.id.clone();
@@ -180,6 +196,7 @@ async fn run_agent_task(
     let approval_gate: Arc<dyn lares_core::approval::ApprovalGate> = Arc::new(SocketApprovalGate {
         sink: Arc::clone(&sink),
         pending: Arc::clone(&pending),
+        config_repo: config.config_repo().clone(),
     });
 
     let question_gate: Arc<dyn lares_core::approval::QuestionGate> = Arc::new(SocketQuestionGate {
@@ -187,33 +204,17 @@ async fn run_agent_task(
         pending_replies: Arc::clone(&pending_replies),
     });
 
-    let agent = AgentLoop::new(config.clone(), username.to_string(), task_store.clone(), approval_gate, question_gate, event_sink)?;
+    let agent = AgentLoop::new(config.clone(), username.to_string(), uid, gid, task_store.clone(), approval_gate, question_gate, event_sink)?;
 
-    match agent.run(prompt, &mut task).await {
-        Ok(()) => {
-            // Save task
-            let _ = task_store.save(&task);
-            send_event(
-                &sink,
-                DaemonEvent::TaskCompleted {
-                    task_id: tid,
-                    summary: "Task finished".into(),
-                },
-            )
-            .await?;
+    match agent.run(text, &mut task).await {
+        Ok(_result) => {
+            task_store.save(&task)?;
+            // Note: TaskCompleted event is already sent by the AgentEvent::TaskCompleted handler above
+            // No need to send it again here - it would cause a broken pipe error
         }
         Err(e) => {
-            task.add_journal("error", &format!("{e:#}"));
-            task.status = lares_core::task::TaskStatus::Failed;
-            let _ = task_store.save(&task);
-            send_event(
-                &sink,
-                DaemonEvent::TaskFailed {
-                    task_id: tid,
-                    error: format!("{e:#}"),
-                },
-            )
-            .await?;
+            task_store.save(&task)?;
+            return Err(e);
         }
     }
 
@@ -223,11 +224,24 @@ async fn run_agent_task(
 struct SocketApprovalGate {
     sink: Arc<Mutex<FramedSink>>,
     pending: PendingApprovals,
+    config_repo: PathBuf,
 }
 
 #[async_trait::async_trait]
 impl lares_core::approval::ApprovalGate for SocketApprovalGate {
     async fn request_approval(&self, action: &ProposedAction) -> Result<bool> {
+        // Auto-approve Nix file edits within the config repo
+        if let ProposedAction::FileEdit { path, .. } = action {
+            let path_buf = PathBuf::from(path);
+            
+            // Check if file is within config repo and is a .nix file
+            if path_buf.starts_with(&self.config_repo) && path_buf.extension().and_then(|s| s.to_str()) == Some("nix") {
+                tracing::info!("Auto-approving Nix config edit: {}", path);
+                return Ok(true);
+            }
+        }
+        
+        // For everything else, request user approval
         let request_id = Uuid::new_v4();
         let (tx, rx) = oneshot::channel();
 
@@ -278,5 +292,60 @@ impl lares_core::approval::QuestionGate for SocketQuestionGate {
 
         let reply = rx.await.unwrap_or_default();
         Ok(reply)
+    }
+}
+
+/// Get the UID, GID, and username of the peer connected to this Unix socket
+fn get_peer_credentials(stream: &tokio::net::UnixStream) -> Result<(String, u32, u32)> {
+    let fd = stream.as_raw_fd();
+    
+    #[cfg(target_os = "macos")]
+    {
+        let mut uid: libc::uid_t = 0;
+        let mut gid: libc::gid_t = 0;
+        
+        unsafe {
+            if libc::getpeereid(fd, &mut uid, &mut gid) != 0 {
+                anyhow::bail!("getpeereid failed");
+            }
+        }
+        
+        let username = uid_to_username(uid)?;
+        Ok((username, uid, gid))
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        let mut ucred: libc::ucred = unsafe { std::mem::zeroed() };
+        let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        
+        unsafe {
+            if libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                &mut ucred as *mut _ as *mut libc::c_void,
+                &mut len,
+            ) != 0 {
+                anyhow::bail!("getsockopt SO_PEERCRED failed");
+            }
+        }
+        
+        let username = uid_to_username(ucred.uid)?;
+        Ok((username, ucred.uid, ucred.gid))
+    }
+}
+
+/// Convert a UID to username using getpwuid
+fn uid_to_username(uid: u32) -> Result<String> {
+    use std::ffi::CStr;
+    
+    unsafe {
+        let pwd = libc::getpwuid(uid);
+        if pwd.is_null() {
+            anyhow::bail!("getpwuid failed for uid {}", uid);
+        }
+        let name_cstr = CStr::from_ptr((*pwd).pw_name);
+        Ok(name_cstr.to_string_lossy().into_owned())
     }
 }

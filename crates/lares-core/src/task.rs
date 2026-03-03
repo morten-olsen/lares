@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::ffi::CString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -38,17 +39,31 @@ struct StateFile {
 #[derive(Clone)]
 pub struct TaskStore {
     base: PathBuf,
+    uid: Option<u32>,
+    gid: Option<u32>,
 }
 
 impl TaskStore {
     pub fn new(config_repo: &Path, username: &str) -> Self {
         Self {
             base: config_repo.join("lares").join("tasks").join(username),
+            uid: None,
+            gid: None,
+        }
+    }
+
+    pub fn with_ownership(config_repo: &Path, username: &str, uid: u32, gid: u32) -> Self {
+        Self {
+            base: config_repo.join("lares").join("tasks").join(username),
+            uid: Some(uid),
+            gid: Some(gid),
         }
     }
 
     pub fn create(&self, prompt: &str, goal: &str) -> Result<Task> {
         fs::create_dir_all(&self.base).context("creating tasks dir")?;
+        self.chown_path(&self.base)?;
+
         let next_id = self.next_id()?;
         let id = format!("{:03}", next_id);
         let slug = slugify(goal);
@@ -69,6 +84,7 @@ impl TaskStore {
         let path = self.base.join(format!("{id}-{slug}.md"));
         let md = task_to_markdown(&task);
         fs::write(&path, md).with_context(|| format!("writing task {}", path.display()))?;
+        self.chown_path(&path)?;
         Ok(task)
     }
 
@@ -76,7 +92,9 @@ impl TaskStore {
         let pattern = format!("{}-", task.id);
         let path = self.find_task_file(&pattern)?;
         let md = task_to_markdown(task);
-        fs::write(&path, md).with_context(|| format!("saving task {}", path.display()))
+        fs::write(&path, md).with_context(|| format!("saving task {}", path.display()))?;
+        self.chown_path(&path)?;
+        Ok(())
     }
 
     pub fn load(&self, id: &str) -> Result<Task> {
@@ -120,6 +138,28 @@ impl TaskStore {
         let state_path = self.base.parent().unwrap().join("state.json");
         let state = StateFile { next_id };
         fs::write(&state_path, serde_json::to_string_pretty(&state)?)?;
+        self.chown_path(&state_path)?;
+        Ok(())
+    }
+
+    /// Change ownership of a file/directory to the user (if uid/gid are set)
+    fn chown_path(&self, path: &Path) -> Result<()> {
+        if let (Some(uid), Some(gid)) = (self.uid, self.gid) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::ffi::OsStrExt;
+
+                let path_cstr = CString::new(path.as_os_str().as_bytes())
+                    .context("converting path to CString")?;
+
+                unsafe {
+                    if libc::chown(path_cstr.as_ptr(), uid, gid) != 0 {
+                        let err = std::io::Error::last_os_error();
+                        anyhow::bail!("chown failed for {}: {}", path.display(), err);
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -169,10 +209,7 @@ fn task_to_markdown(task: &Task) -> String {
         "origin_prompt: \"{}\"\n",
         task.origin_prompt.replace('"', "\\\"")
     ));
-    out.push_str(&format!(
-        "goal: \"{}\"\n",
-        task.goal.replace('"', "\\\"")
-    ));
+    out.push_str(&format!("goal: \"{}\"\n", task.goal.replace('"', "\\\"")));
     if !task.config_commits.is_empty() {
         out.push_str("config_commits:\n");
         for c in &task.config_commits {

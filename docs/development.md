@@ -12,10 +12,7 @@ The binaries end up at `target/debug/laresd` (daemon) and `target/debug/lares` (
 
 ## Configuration
 
-The daemon reads its config from `lares.toml` at the root of the config repo:
-
-- **macOS**: `/Library/Lares/lares.toml`
-- **Linux**: `/etc/lares/lares.toml`
+The daemon reads its config from `lares.toml`. See the [Configuration Guide](./config.md) for a full list of options.
 
 For development, override the config path with the `LARES_CONFIG` env var:
 
