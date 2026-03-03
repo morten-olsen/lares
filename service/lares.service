@@ -1,0 +1,29 @@
+[Unit]
+Description=Lares - AI-powered system configuration agent
+Documentation=https://github.com/your-org/lares
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/laresd
+Restart=on-failure
+RestartSec=5s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lares
+
+# Environment
+Environment="RUST_LOG=info"
+
+# Security - daemon needs root for system config access
+# but drops privileges for command execution
+User=root
+Group=root
+
+# Resource limits
+LimitNOFILE=2048
+
+[Install]
+WantedBy=multi-user.target

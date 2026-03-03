@@ -171,18 +171,28 @@ impl Config {
 }
 
 /// Resolve the path to lares.toml.
-/// Priority: LARES_CONFIG env var > ~/.config/lares.toml > /Library/Lares/lares.toml
+/// Priority: LARES_CONFIG env var > system config > ~/.config/lares.toml (fallback)
 fn config_path() -> PathBuf {
     if let Ok(p) = std::env::var("LARES_CONFIG") {
         return PathBuf::from(p);
     }
+
+    // Check system config location first (important when running as root/service)
+    let system_config = platform_config_repo().join("lares.toml");
+    if system_config.exists() {
+        return system_config;
+    }
+
+    // Fallback to user config (useful for development)
     if let Some(home) = dirs::home_dir() {
         let user_config = home.join(".config/lares.toml");
         if user_config.exists() {
             return user_config;
         }
     }
-    platform_config_repo().join("lares.toml")
+
+    // If neither exists, return system location (for error messages)
+    system_config
 }
 
 pub fn default_socket_path() -> PathBuf {

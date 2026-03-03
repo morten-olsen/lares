@@ -1,0 +1,59 @@
+================================================================================
+                    LARES DAEMON - QUICK INSTALL GUIDE
+================================================================================
+
+STEP 1: Build the project
+--------------------------
+$ cargo build --release
+
+
+STEP 2: Install as system service
+----------------------------------
+$ cd service
+$ sudo ./install.sh
+
+
+STEP 3: Initialize configuration
+---------------------------------
+$ sudo lares init
+
+
+STEP 4: Test it works
+----------------------
+$ lares "what version of $(uname -s) am I running"
+
+
+That's it! 🎉
+
+================================================================================
+
+SERVICE MANAGEMENT
+==================
+
+Simple Scripts (Recommended):
+  Start:     sudo ./start.sh
+  Stop:      sudo ./stop.sh
+  Restart:   sudo ./restart.sh
+  Status:    ./status.sh  (or sudo ./status.sh for full details)
+  Uninstall: sudo ./uninstall.sh
+
+Or use platform-native commands:
+
+macOS (LaunchDaemon):
+  Start:   sudo launchctl load -w /Library/LaunchDaemons/ai.lares.daemon.plist
+  Stop:    sudo launchctl unload /Library/LaunchDaemons/ai.lares.daemon.plist
+  Restart: sudo launchctl kickstart -k system/ai.lares.daemon
+  Logs:    tail -f /var/log/lares/laresd.log
+
+Linux (systemd):
+  Start:   sudo systemctl start lares
+  Stop:    sudo systemctl stop lares
+  Restart: sudo systemctl restart lares
+  Status:  sudo systemctl status lares
+  Logs:    sudo journalctl -u lares -f
+
+For detailed documentation, see:
+  - docs/installation.md    (Installation guide)
+  - docs/getting-started.md (Getting started guide)
+
+================================================================================

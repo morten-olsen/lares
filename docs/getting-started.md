@@ -94,9 +94,22 @@ This clones the repo to the platform-appropriate location, then adopts it.
 
 ## Running
 
-### 1. Start the daemon
+You can run lares either as a system service (recommended) or manually for development.
 
-The daemon runs as root (as a system service or directly):
+### Option A: Install as System Service (Recommended)
+
+For production use, install lares as a system service that starts automatically on boot:
+
+```sh
+cd service
+sudo ./install.sh
+```
+
+This installs the daemon as a LaunchDaemon (macOS) or systemd service (Linux), running as root with automatic restart on failure. See [installation.md](./installation.md) for details.
+
+### Option B: Run Manually (Development)
+
+For development, you can run the daemon directly:
 
 ```sh
 sudo laresd
@@ -111,7 +124,8 @@ sudo cargo run --bin laresd
 You should see:
 
 ```
-INFO laresd: laresd listening on /run/lares/lares.sock
+INFO laresd: laresd listening on /var/run/lares/lares.sock  # macOS
+INFO laresd: laresd listening on /run/lares/lares.sock      # Linux
 ```
 
 Set `RUST_LOG=debug` for verbose output.

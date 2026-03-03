@@ -1,0 +1,92 @@
+================================================================================
+                    LARES SERVICE MANAGEMENT - QUICK REFERENCE
+================================================================================
+
+All commands should be run from the service/ directory:
+  $ cd /path/to/lares/service
+
+COMMON TASKS
+============
+
+Check Service Status:
+  $ ./status.sh
+  $ sudo ./status.sh  # for full details including logs
+
+Start Service:
+  $ sudo ./start.sh
+
+Stop Service:
+  $ sudo ./stop.sh
+
+Restart Service (e.g., after rebuilding):
+  $ sudo ./restart.sh
+
+View Live Logs:
+  macOS:  $ tail -f /var/log/lares/laresd.log
+  Linux:  $ sudo journalctl -u lares -f
+
+Uninstall Completely:
+  $ sudo ./uninstall.sh
+
+
+TYPICAL WORKFLOW
+================
+
+After Making Code Changes:
+--------------------------
+1. Rebuild the project:
+   $ cd /path/to/lares
+   $ cargo build --release
+
+2. Restart the service:
+   $ cd service
+   $ sudo ./restart.sh
+
+3. Verify it's working:
+   $ ./status.sh
+   $ lares "test prompt"
+
+
+Debugging Issues:
+-----------------
+1. Check status:
+   $ sudo ./status.sh
+
+2. View recent logs (included in status output)
+
+3. Try restarting:
+   $ sudo ./restart.sh
+
+4. If still failing, check configuration:
+   $ cat ~/.config/lares.toml
+
+
+Temporary Development:
+----------------------
+If you want to run manually during development instead of as a service:
+
+1. Stop the service:
+   $ sudo ./stop.sh
+
+2. Run manually:
+   $ cd /path/to/lares
+   $ sudo RUST_LOG=debug cargo run --bin laresd
+
+3. When done, restart the service:
+   $ cd service
+   $ sudo ./start.sh
+
+
+SCRIPTS REFERENCE
+=================
+
+install.sh      Install and start the service (run once)
+start.sh        Start the service
+stop.sh         Stop the service
+restart.sh      Restart the service (use after rebuilding)
+status.sh       Show status, logs, and diagnostics
+uninstall.sh    Remove the service completely
+
+All scripts (except status.sh) require root: sudo ./script.sh
+
+================================================================================
